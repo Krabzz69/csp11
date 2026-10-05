@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && cp dist/index.html dist/CS9618-Revision-App.html && cp dist/index.html public/CS9618-Revision-App.html",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,7 +20,8 @@
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.8.0",
     "recharts": "^2.10.0",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "vite-plugin-singlefile": "^2.3.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.7",

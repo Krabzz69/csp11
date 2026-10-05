@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { topics, keywordMemory, Topic, Flashcard, QuizQuestion } from './data/content';
+import {
+  plan4Days, plan1Day, examMorningChecklist, examRules, fullKeywordList,
+  cheatSheets, buckets, rescuePlan, panicTips, commonMistakes,
+  calcDrills, gateTruthTables, sqlMemoryDrills, registerDrills, DrillCard,
+} from './data/plan';
 
-type View = 'dashboard' | 'flashcards' | 'quiz' | 'keywords' | 'topic-detail' | 'progress';
+type View = 'dashboard' | 'flashcards' | 'quiz' | 'keywords' | 'topic-detail' | 'progress' | 'plan' | 'rules' | 'drills';
 
 interface ProgressData {
   [cardId: string]: { correct: number; incorrect: number; lastSeen: number };
@@ -760,9 +765,553 @@ function ProgressView() {
   );
 }
 
+// ===== GENERIC DRILL DECK (active recall, self-graded) =====
+function DrillDeck({ cards, accent }: { cards: DrillCard[]; accent: string }) {
+  const [idx, setIdx] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const [known, setKnown] = useState<Set<number>>(new Set());
+  const [missed, setMissed] = useState<Set<number>>(new Set());
+
+  const card = cards[idx];
+
+  const advance = (gotIt: boolean) => {
+    const next = new Set(gotIt ? known : missed);
+    const other = new Set(gotIt ? missed : known);
+    next.add(idx);
+    other.delete(idx);
+    setKnown(next);
+    setMissed(other);
+    if (next.size === cards.length) return; // cycle complete
+    let i = (idx + 1) % cards.length;
+    while (next.has(i) && next.size < cards.length) i = (i + 1) % cards.length;
+    setIdx(i);
+    setRevealed(false);
+  };
+
+  const done = known.size === cards.length;
+
+  if (done) {
+    return (
+      <div className="text-center space-y-4 py-6">
+        <div className="text-5xl">🎉</div>
+        <p className="font-semibold text-gray-800">Full deck recalled! Run it again to lock it in.</p>
+        <button
+          onClick={() => { setKnown(new Set()); setMissed(new Set()); setIdx(0); setRevealed(false); }}
+          className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition"
+        >
+          Restart deck
+        </button>
+        {missed.size > 0 && (
+          <p className="text-sm text-red-600">You missed {missed.size} card(s) along the way — they are your weak spots.</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="w-full bg-gray-200 rounded-full h-2">
+        <div className={`h-2 rounded-full transition-all ${accent}`} style={{ width: `${(known.size / cards.length) * 100}%` }} />
+      </div>
+      <p className="text-xs text-gray-500">{known.size}/{cards.length} recalled · Card {idx + 1}</p>
+      <div
+        onClick={() => setRevealed(!revealed)}
+        className={`cursor-pointer rounded-xl border-2 p-5 min-h-[120px] flex flex-col justify-center ${revealed ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200'}`}
+      >
+        <p className="font-semibold text-gray-800 text-sm md:text-base">{card.front}</p>
+        {revealed ? (
+          <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans mt-3 leading-relaxed">{card.back}</pre>
+        ) : (
+          <span className="text-xs text-gray-400 mt-3">Tap to reveal</span>
+        )}
+      </div>
+      {revealed && (
+        <div className="flex gap-3 justify-center">
+          <button onClick={() => advance(false)} className="px-5 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg font-medium text-sm transition">❌ Missed</button>
+          <button onClick={() => advance(true)} className="px-5 py-2 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg font-medium text-sm transition">✅ Got it</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== CALC DRILLS (type-the-answer, active practice) =====
+function CalcDrillView() {
+  const [answers, setAnswers] = useState<{ [id: string]: string }>({});
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState(false);
+
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const isCorrect = (id: string, expected: string) => {
+    const a = norm(answers[id] || '');
+    const e = norm(expected);
+    return a !== '' && (a === e || a.includes(e) || e.includes(a));
+  };
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800">🧮 20 Calculation Drills (Day 1)</h2>
+        <button onClick={() => setShowAll(!showAll)} className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-200 transition">
+          {showAll ? 'Hide all answers' : 'Show all answers'}
+        </button>
+      </div>
+      <p className="text-sm text-gray-500">Write your answer + working FIRST on paper, then type it here to check. Always show working in the exam.</p>
+      {calcDrills.map((p, i) => {
+        const revealed = checked.has(p.id) || showAll;
+        const correct = isCorrect(p.id, p.answer);
+        return (
+          <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+            <p className="text-sm font-medium text-gray-800">{i + 1}. {p.prompt}</p>
+            <div className="flex gap-2">
+              <input
+                value={answers[p.id] || ''}
+                onChange={(e) => setAnswers({ ...answers, [p.id]: e.target.value })}
+                placeholder="Your answer..."
+                className={`flex-1 p-2 rounded-lg border text-sm outline-none transition ${revealed ? (correct ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300') : 'border-gray-300 focus:border-indigo-400'}`}
+              />
+              {!checked.has(p.id) && !showAll && (
+                <button onClick={() => setChecked(new Set([...checked, p.id]))} className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition shrink-0">Check</button>
+              )}
+            </div>
+            {revealed && (
+              <div className={`text-sm rounded-lg p-3 ${correct ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'}`}>
+                <p><strong>Answer:</strong> {p.answer} {correct ? '✅' : '— check your sign/format'}</p>
+                <p className="mt-1 text-xs"><strong>Working:</strong> {p.working}</p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ===== TRUTH TABLE DRILLS =====
+function TruthTableView() {
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const toggle = (g: string) => {
+    const n = new Set(hidden);
+    n.has(g) ? n.delete(g) : n.add(g);
+    setHidden(n);
+  };
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-gray-800">🚪 Logic Gate Truth Tables</h2>
+        <button onClick={() => setHidden(new Set(gateTruthTables.map(g => g.gate)))} className="text-sm bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg hover:bg-indigo-200 transition">Hide all — test yourself</button>
+      </div>
+      <p className="text-sm text-gray-500">Cover a table, sketch it from memory on paper, then reveal and compare. Say the rule aloud with the exact keywords.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {gateTruthTables.map(g => (
+          <div key={g.gate} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-800">{hidden.has(g.gate) ? '???' : g.gate}</h3>
+              <button onClick={() => toggle(g.gate)} className="text-xs text-indigo-600 hover:text-indigo-800">{hidden.has(g.gate) ? 'Reveal' : 'Hide'}</button>
+            </div>
+            {!hidden.has(g.gate) && (
+              <>
+                <p className="text-xs text-amber-700 font-medium mt-1">{g.rule}</p>
+                <pre className="text-sm text-gray-700 mt-2 font-mono bg-gray-50 rounded-lg p-3">{g.table}</pre>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ===== SQL FROM MEMORY =====
+function SqlMemoryView() {
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">✍️ Write 10 SQL Queries From Memory (Day 3)</h2>
+      <p className="text-sm text-gray-500">Read the task → write the query on PAPER → reveal → mark yourself like a examiner: exact names, alias, GROUP BY, ORDER BY direction.</p>
+      <DrillDeck cards={sqlMemoryDrills} accent="bg-purple-500" />
+    </div>
+  );
+}
+
+// ===== REGISTERS / FETCH / ADDRESSING =====
+function RegisterDrillView() {
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">🧠 Registers, Fetch Cycle & Addressing (Day 4)</h2>
+      <p className="text-sm text-gray-500">Say each answer OUT LOUD before revealing. If you hesitate, mark it Missed. Exact keywords only.</p>
+      <DrillDeck cards={registerDrills} accent="bg-indigo-500" />
+    </div>
+  );
+}
+
+// ===== DRILLS HUB =====
+function DrillsHub({ onPick }: { onPick: (d: string) => void }) {
+  const drills = [
+    { id: 'calc', icon: '🧮', title: 'Calculation Drills', desc: '20 binary/hex/two’s-complement/file-size questions with worked answers. Day 1.' },
+    { id: 'truth', icon: '🚪', title: 'Truth Table Blaster', desc: 'Hide-and-recall all 6 gate truth tables with exact rules.' },
+    { id: 'sqlmem', icon: '✍️', title: 'SQL From Memory', desc: '8 query tasks — write on paper, reveal, self-mark. Day 3 goal.' },
+    { id: 'regs', icon: '🧠', title: 'Registers & Fetch Cycle', desc: 'PC/MAR/MDR/CIR/ACC + fetch order + addressing modes. Day 4.' },
+    { id: 'mixed', icon: '🔀', title: 'Mixed Rapid Fire', desc: 'binary → SQL → register → RLE → topology → checksum — retrieval under exam conditions.' },
+  ];
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">⚡ Active Drill Hub</h2>
+      <p className="text-sm text-gray-500">No passive reading here. Every drill forces you to produce the answer first, then check. Spend time only on what you miss.</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {drills.map(d => (
+          <button key={d.id} onClick={() => onPick(d.id)} className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:shadow-md hover:scale-[1.02] transition-all">
+            <div className="text-2xl">{d.icon}</div>
+            <h3 className="font-semibold text-gray-800 mt-2 text-sm">{d.title}</h3>
+            <p className="text-xs text-gray-500 mt-1">{d.desc}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DrillsView({ picked, onPick, onBack }: { picked: string | null; onPick: (d: string) => void; onBack: () => void }) {
+  if (!picked) return <DrillsHub onPick={onPick} />;
+  const titles: { [k: string]: string } = { calc: '🧮 Calculations', truth: '🚪 Truth Tables', sqlmem: '✍️ SQL From Memory', regs: '🧠 Registers', mixed: '🔀 Mixed Rapid Fire' };
+  return (
+    <div className="space-y-4">
+      <button onClick={() => onPick('')} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">← All drills</button>
+      {picked !== 'calc' && picked !== 'truth' && (
+        <h2 className="text-lg font-bold text-gray-800">{titles[picked]}</h2>
+      )}
+      {picked === 'calc' && <CalcDrillView />}
+      {picked === 'truth' && <TruthTableView />}
+      {picked === 'sqlmem' && <SqlMemoryView />}
+      {picked === 'regs' && <RegisterDrillView />}
+      {picked === 'mixed' && <DrillDeck cards={[...calcDrills.slice(0, 6).map(c => ({ id: c.id, front: c.prompt, back: c.answer + '\n\n' + c.working })), ...registerDrills, ...sqlMemoryDrills]} accent="bg-orange-500" />}
+    </div>
+  );
+}
+
+// ===== STUDY PLAN VIEW =====
+function PlanView() {
+  const [tab, setTab] = useState<'4days' | '1day' | 'morning' | 'rescue' | 'method'>('4days');
+  const tabs = [
+    { id: '4days', label: '📅 4 Days' },
+    { id: '1day', label: '⏱️ 1 Day (8 hrs)' },
+    { id: 'morning', label: '☀️ Exam Morning' },
+    { id: 'rescue', label: '🚨 60-Min Rescue' },
+    { id: 'method', label: '🧪 Memorization Method' },
+  ] as const;
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">🗓️ Friday Emergency Study Plan</h2>
+      <div className="flex flex-wrap gap-2">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === '4days' && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-500">Assuming you have until Friday — one bucket per day, task-driven, with a measurable goal.</p>
+          {plan4Days.map((day, i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-800">{day.title}</h3>
+              <p className="text-xs text-gray-500 mt-2 mb-1 font-medium uppercase tracking-wide">Focus</p>
+              <div className="flex flex-wrap gap-1.5">
+                {day.focus.map((f, j) => (
+                  <span key={j} className="bg-indigo-50 text-indigo-700 text-xs px-2 py-1 rounded-lg border border-indigo-100">{f}</span>
+                ))}
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 flex flex-col md:flex-row md:justify-between gap-1 text-sm">
+                <p><strong>Task:</strong> {day.task}</p>
+                <p className="text-green-700 font-medium">🎯 {day.goal}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === '1day' && (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-500">Only one day left? Use this exact 8-hour plan. Hour 8 ends with sleep — do NOT all-nighter. Sleep consolidates memory.</p>
+          {plan1Day.map(h => (
+            <div key={h.hour} className="bg-white rounded-xl border border-gray-200 p-4 flex gap-4 items-start">
+              <div className="bg-indigo-600 text-white font-bold rounded-lg w-12 h-12 flex items-center justify-center shrink-0">{h.hour}h</div>
+              <div>
+                <h3 className="font-semibold text-gray-800 text-sm">{h.title}</h3>
+                <p className="text-xs text-gray-500 mt-1">{h.detail}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'morning' && (
+        <div className="space-y-3">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <p className="text-amber-800 text-sm font-medium">Spend 30–45 minutes ONLY on these 10 items. Do not learn new topics exam morning.</p>
+          </div>
+          <ol className="space-y-2">
+            {examMorningChecklist.map((item, i) => (
+              <li key={i} className="bg-white rounded-lg border border-gray-200 p-3 flex items-center gap-3 text-sm">
+                <span className="bg-green-100 text-green-700 font-bold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{i + 1}</span>
+                {item}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {tab === 'rescue' && (
+        <div className="space-y-3">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <p className="text-red-800 text-sm font-bold">Panicking? Do this RIGHT NOW — 60 minutes, 6 blocks of 10.</p>
+          </div>
+          {rescuePlan.map((s, i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-800 text-sm">Min {s.minutes} — {s.title}</h3>
+              <pre className="text-xs text-gray-600 whitespace-pre-wrap font-sans mt-2 bg-gray-50 rounded-lg p-3 leading-relaxed">{s.content}</pre>
+            </div>
+          ))}
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+            <p className="text-indigo-800 text-sm font-semibold mb-2">Final truth — near-100% comes from this list, not from reading everything:</p>
+            {panicTips.map((t, i) => (
+              <p key={i} className="text-xs text-indigo-700 leading-relaxed">{t}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'method' && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 font-medium">The fastest memorization routine for the next few days — active recall only, no passive reading.</p>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-2">Step 1 — Break the syllabus into 10 buckets</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {buckets.map(b => (
+                <span key={b.num} className="bg-indigo-50 border border-indigo-100 rounded-lg p-2 text-xs text-center text-indigo-800">
+                  <strong>{b.num}.</strong> {b.name}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-1">Step 2 — Only 10 cards per bucket</h3>
+            <p className="text-xs text-gray-600">Do not make 100 cards. Make the best 10. CPU example: PC role, MAR role, MDR role, CIR role, ACC role, fetch order, immediate, direct, indirect, indexed addressing.</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-1">Step 3 — Test yourself OUT LOUD</h3>
+            <p className="text-xs text-gray-600">Say: “PC stores the address of the next instruction to be fetched from memory.” If you hesitate, repeat.</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-1">Step 4 — Write only the hardest 20%</h3>
+            <p className="text-xs text-gray-600">Ignore easy cards after two correct recalls. Spend time only on cards you miss (use the ❌ button — Stats tracks them).</p>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-1">Step 5 — Do MIXED practice near the exam</h3>
+            <p className="text-xs text-gray-600">binary → SQL → register → RLE → topology → checksum → LMC → sampling. This trains retrieval under exam conditions. Use the <strong>Drills → Mixed Rapid Fire</strong> deck.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== EXAM RULES + CHEAT SHEETS + FULL KEYWORDS VIEW =====
+function RulesView() {
+  const [tab, setTab] = useState<'rules' | 'keywords' | 'sheets' | 'mistakes'>('rules');
+  const tabs = [
+    { id: 'rules', label: '🛑 Do Not Lose Marks' },
+    { id: 'keywords', label: '🔑 Full Keyword List' },
+    { id: 'sheets', label: '📜 Cheat Sheets' },
+    { id: 'mistakes', label: '⚠️ Lost-Mark Traps' },
+  ] as const;
+
+  const grouped = fullKeywordList.reduce((acc, k) => {
+    (acc[k.bucket] = acc[k.bucket] || []).push(k);
+    return acc;
+  }, {} as { [key: string]: typeof fullKeywordList });
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-4">
+      <h2 className="text-xl font-bold text-gray-800">🛑 The “Do Not Lose Marks” System</h2>
+      <p className="text-sm text-gray-500">These rules are as important as knowing the content. Your target: produce exactly what the mark scheme rewards.</p>
+      <div className="flex flex-wrap gap-2">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${tab === t.id ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'rules' && (
+        <div className="space-y-3">
+          {examRules.map(rule => (
+            <div key={rule.id} className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-800 text-sm">Rule {rule.id}: {rule.title}</h3>
+              <p className="text-xs text-gray-600 mt-1">{rule.summary}</p>
+              {rule.bad && (
+                <div className="mt-2 bg-red-50 border border-red-100 rounded-lg p-2">
+                  <p className="text-xs text-red-700"><strong>✗ Don’t say:</strong> {rule.bad}</p>
+                </div>
+              )}
+              {rule.good && (
+                <pre className="mt-2 bg-green-50 border border-green-100 rounded-lg p-3 text-xs text-green-800 whitespace-pre-wrap font-sans"><strong>✓ Write:</strong>{'\n'}{rule.good}</pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'keywords' && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">If you only memorize 50 lines, memorize these. Tap a term to hide/reveal its definition — say it out loud first.</p>
+          {Object.entries(grouped).map(([bucket, items]) => (
+            <div key={bucket}>
+              <h3 className="font-bold text-gray-700 text-sm mb-2 uppercase tracking-wide">{bucket}</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {items.map((k, i) => <KeywordRow key={`${bucket}-${i}`} term={k.term} definition={k.definition} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'sheets' && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">Memorize the SQL sheet word-for-word. Cover a section, rewrite it from memory on paper, then compare line by line.</p>
+          {cheatSheets.map(sheet => (
+            <div key={sheet.id} className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-800 text-sm mb-3">{sheet.icon} {sheet.title}</h3>
+              <div className="space-y-3">
+                {sheet.sections.map((sec, i) => (
+                  <CheatSection key={i} heading={sec.heading} lines={sec.lines} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'mistakes' && (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">The 10 most common ways students lose marks — and the exact fix.</p>
+          {commonMistakes.map((m, i) => (
+            <div key={i} className="bg-white rounded-xl border border-gray-200 p-4">
+              <h3 className="font-bold text-gray-800 text-sm">{m.problem}</h3>
+              <p className="text-xs text-red-700 mt-2 bg-red-50 rounded-lg p-2"><strong>Bad:</strong> {m.bad}</p>
+              <p className="text-xs text-green-700 mt-1 bg-green-50 rounded-lg p-2"><strong>Good:</strong> {m.good}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KeywordRow({ term, definition }: { term: string; definition: string }) {
+  const [hidden, setHidden] = useState(false);
+  return (
+    <button onClick={() => setHidden(!hidden)} className={`text-left rounded-lg border p-3 transition ${hidden ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200 hover:shadow-sm'}`}>
+      <p className="font-bold text-sm text-indigo-700">{hidden ? '🔒 ' + term : term}</p>
+      <p className={`text-xs mt-1 ${hidden ? 'text-gray-300 blur-sm select-none' : 'text-gray-600'}`}>{definition}</p>
+      {hidden && <p className="text-[10px] text-gray-400 mt-1">tap to reveal</p>}
+    </button>
+  );
+}
+
+function CheatSection({ heading, lines }: { heading: string; lines: string[] }) {
+  const [covered, setCovered] = useState(false);
+  return (
+    <div className="rounded-lg border border-gray-100 overflow-hidden">
+      <div className="flex items-center justify-between bg-gray-50 px-3 py-1.5">
+        <span className="text-xs font-semibold text-gray-700">{heading}</span>
+        <button onClick={() => setCovered(!covered)} className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium">
+          {covered ? 'Reveal' : 'Cover — write from memory'}
+        </button>
+      </div>
+      <pre className={`text-xs font-mono p-3 leading-relaxed whitespace-pre-wrap transition ${covered ? 'text-transparent select-none bg-gray-100' : 'text-gray-800 bg-white'}`}>
+        {lines.join('\n')}
+      </pre>
+    </div>
+  );
+}
+
+// ===== OFFLINE APP DOWNLOAD (single self-contained HTML file) =====
+async function downloadOfflineApp() {
+  try {
+    const resp = await fetch(location.origin + '/CS9618-Revision-App.html');
+    if (resp.ok) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'CS9618-Revision-App.html';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return;
+    }
+
+    // Fallback: build the single file in-browser from the live page
+    let css = '';
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        const rules = sheet.cssRules;
+        if (rules) css += Array.from(rules).map(r => r.cssText).join('\n') + '\n';
+      } catch { /* cross-origin stylesheet — skip */ }
+    }
+
+    const srcs = Array.from(document.querySelectorAll('script[src]')).map(s => (s as HTMLScriptElement).src);
+    const modSrc = srcs.find(u => u.includes('/assets/')) || srcs[0];
+    if (!modSrc) throw new Error('app bundle not found');
+    const jsResp = await fetch(modSrc);
+    if (!jsResp.ok) throw new Error('could not fetch app bundle');
+    const js = await jsResp.text();
+    if (js.includes('from "') || /from '/.test(js)) {
+      throw new Error('dev-mode script detected; open the built site to download');
+    }
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CS 9618 P1 — Offline Revision App</title>
+<style>
+${css}
+html,body{margin:0;padding:0;background:#f9fafb;}
+#offline-banner{background:#059669;color:#fff;text-align:center;font-size:12px;padding:6px;font-family:system-ui,sans-serif;}
+</style>
+</head>
+<body>
+<div id="offline-banner">📴 Offline copy of CS 9618 Paper 1 Active Revision — everything works without internet. Your progress is saved on this device.</div>
+<div id="root"></div>
+<script type="text/javascript">
+${js}
+</script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'CS9618-Revision-App.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    alert('Download failed in this preview environment.\n\nOpen the GitHub Pages site and press the green "⬇️ Download App" button there — it saves the whole app as one offline .html file you can double-click anytime.');
+  }
+}
+
 // ===== MAIN APP =====
 export default function App() {
   const [view, setView] = useState<View>('dashboard');
+  const [drillPick, setDrillPick] = useState<string | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [quizTopic, setQuizTopic] = useState<Topic | null>(null);
   const [flashcardTopic, setFlashcardTopic] = useState<Topic | null>(null);
@@ -817,16 +1366,25 @@ export default function App() {
     <div className="min-h-screen bg-gray-50">
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur-sm border-b border-gray-200 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button onClick={() => { setView('dashboard'); setSelectedTopic(null); }} className="font-bold text-indigo-700 text-sm md:text-base">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3 justify-between">
+          <button onClick={() => { setView('dashboard'); setSelectedTopic(null); }} className="font-bold text-indigo-700 text-sm md:text-base shrink-0">
             CS 9618 P1
           </button>
-          <div className="flex gap-1 md:gap-2">
+          <div className="flex gap-1 md:gap-2 overflow-x-auto">
             <NavButton active={view === 'dashboard'} onClick={() => { setView('dashboard'); setSelectedTopic(null); }}>
               📋 Topics
             </NavButton>
             <NavButton active={view === 'flashcards'} onClick={handleGlobalFlashcards}>
               🃏 Cards
+            </NavButton>
+            <NavButton active={view === 'drills'} onClick={() => setView('drills')}>
+              ⚡ Drills
+            </NavButton>
+            <NavButton active={view === 'plan'} onClick={() => setView('plan')}>
+              🗓️ Plan
+            </NavButton>
+            <NavButton active={view === 'rules'} onClick={() => setView('rules')}>
+              🛑 Rules
             </NavButton>
             <NavButton active={view === 'quiz'} onClick={handleGlobalQuiz}>
               🧠 Quiz
@@ -837,6 +1395,13 @@ export default function App() {
             <NavButton active={view === 'progress'} onClick={() => setView('progress')}>
               📊 Stats
             </NavButton>
+            <button
+              onClick={downloadOfflineApp}
+              title="Download the WHOLE app as ONE offline file — double-click to open on any PC/phone, no internet needed"
+              className="shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs md:text-sm font-semibold px-2 md:px-3 py-1.5 rounded-lg transition whitespace-nowrap"
+            >
+              ⬇️ Download App
+            </button>
           </div>
         </div>
       </nav>
@@ -866,6 +1431,11 @@ export default function App() {
         )}
         {view === 'keywords' && <KeywordView />}
         {view === 'progress' && <ProgressView />}
+        {view === 'plan' && <PlanView />}
+        {view === 'rules' && <RulesView />}
+        {view === 'drills' && (
+          <DrillsView picked={drillPick ?? null} onPick={(d) => setDrillPick(d || null)} onBack={() => setView('dashboard')} />
+        )}
       </main>
     </div>
   );
